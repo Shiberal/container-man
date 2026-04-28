@@ -79,6 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
     containers_transfer_send.add_argument("--wait-confirm-port", type=int)
     containers_transfer_send.add_argument("--confirm-timeout", default=120.0, type=float)
     containers_transfer_send.add_argument("--move", action="store_true")
+    containers_transfer_send.add_argument("--remove-after-verification", action="store_true")
     containers_transfer_send.add_argument("--yes", action="store_true")
 
     containers_transfer_receive = containers_transfer_sub.add_parser("receive")
@@ -315,12 +316,19 @@ def _default_receiver_package() -> str:
 
 def cmd_containers_transfer_send(runtime: DockerCliRuntime, args: argparse.Namespace) -> int:
     service = ContainerTransferService(runtime=runtime)
-    if args.move:
+    should_remove_after_verification = args.move or args.remove_after_verification
+    if should_remove_after_verification:
         if not args.yes:
-            print("error: --move requires --yes confirmation", file=sys.stderr)
+            print(
+                "error: --remove-after-verification requires --yes confirmation",
+                file=sys.stderr,
+            )
             return 2
         if not args.wait_confirm_port:
-            print("error: --move requires --wait-confirm-port", file=sys.stderr)
+            print(
+                "error: --remove-after-verification requires --wait-confirm-port",
+                file=sys.stderr,
+            )
             return 2
     result = service.send_container(
         container=args.container,
@@ -361,7 +369,7 @@ def cmd_containers_transfer_send(runtime: DockerCliRuntime, args: argparse.Names
                 {"metric": "receiver_status", "value": verification.details},
             ]
         )
-        if args.move:
+        if should_remove_after_verification:
             removed_volumes = service.remove_sender_container_after_move(args.container)
             rows.append({"metric": "source_removed", "value": "true"})
             rows.append(

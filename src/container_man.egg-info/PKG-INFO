@@ -14,8 +14,8 @@ Python CLI to manage Docker containers and volumes, inspect where volumes live, 
 
 - `cm containers list`
 - `cm containers migrate --container <name> --target <path> [--apply --yes]`
-- `cm containers transfer send --container <name> --host <ip> --port <udp-port> --package <path>`
-- `cm containers transfer receive --package <path> --port <udp-port> [--name <new-name>]`
+- `cm containers transfer send --container <name> --host <ip> [--port <udp-port>] [--package <path>]`
+- `cm containers transfer receive [--package <path>] [--port <udp-port>] [--name <new-name>]`
 - `cm volumes list`
 - `cm volumes map`
 - `cm volumes migrate --volume <name> --target <path> [--apply --yes]`
@@ -24,15 +24,30 @@ Python CLI to manage Docker containers and volumes, inspect where volumes live, 
 
 ## Host-to-host full container transfer example
 
-Receiver (`nodeB`, `192.168.1.11`):
+Receiver (`nodeB`, `192.168.1.11`) simplest:
 
-`cm containers transfer receive --package /srv/inbox/webapp.cm.tgz --bind-host 192.168.1.11 --port 9000`
+`cm containers transfer receive`
 
-Sender (`nodeA`, `192.168.1.10`):
+Sender (`nodeA`, `192.168.1.10`) simplest:
 
-`cm containers transfer send --container webapp --package /tmp/webapp.cm.tgz --host 192.168.1.11 --port 9000 --bind-host 192.168.1.10`
+`cm containers transfer send --container webapp --host 192.168.1.11`
+
+Default values:
+- port = `9000`
+- sender package path = `/tmp/<container>.cm.tgz`
+- receiver package path = `/tmp/cm-received-container.cm.tgz`
 
 The flow snapshots the container image, packages named volume data, sends package over UDP with ACK+retry and SHA-256 verification, then recreates container on target.
+
+### Move semantics (verify then delete source)
+
+Receiver (verify + send confirmation back):
+
+`cm containers transfer receive --package /srv/inbox/webapp.cm.tgz --bind-host 192.168.1.11 --port 9000 --confirm-host 192.168.10.122 --confirm-port 9100`
+
+Sender (wait confirmation, then remove source):
+
+`cm containers transfer send --container webapp --package /tmp/webapp.cm.tgz --host 192.168.1.11 --port 9000 --bind-host 192.168.10.122 --wait-confirm-port 9100 --move --yes`
 
 ## Notes
 
@@ -41,3 +56,4 @@ The flow snapshots the container image, packages named volume data, sends packag
 - Use dry-run by default; use `--apply --yes` to execute.
 - `volumes map` shows both Docker logical mountpoint and resolved data path.
 - Full-container UDP transfer supports named volumes; bind mounts are rejected because host paths are not portable.
+- `--move` only removes source after receiver confirms container is running and healthy (or has no healthcheck).
