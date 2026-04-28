@@ -1,0 +1,35 @@
+# container-man
+
+Python CLI to manage Docker containers and volumes, inspect where volumes live, and prepare safe offline volume migration workflows.
+
+## Current commands
+
+- `cm containers list`
+- `cm containers migrate --container <name> --target <path> [--apply --yes]`
+- `cm containers transfer send --container <name> --host <ip> --port <udp-port> --package <path>`
+- `cm containers transfer receive --package <path> --port <udp-port> [--name <new-name>]`
+- `cm volumes list`
+- `cm volumes map`
+- `cm volumes migrate --volume <name> --target <path> [--apply --yes]`
+- `cm transfer receive --output <path> --port <udp-port> [--bind-host <ip> --overwrite --timeout <seconds>]`
+- `cm transfer send --source <path> --host <ip> --port <udp-port> [--bind-host <ip> --bind-port <port> --chunk-size <bytes> --timeout <seconds> --retries <n>]`
+
+## Host-to-host full container transfer example
+
+Receiver (`nodeB`, `192.168.1.11`):
+
+`cm containers transfer receive --package /srv/inbox/webapp.cm.tgz --bind-host 192.168.1.11 --port 9000`
+
+Sender (`nodeA`, `192.168.1.10`):
+
+`cm containers transfer send --container webapp --package /tmp/webapp.cm.tgz --host 192.168.1.11 --port 9000 --bind-host 192.168.1.10`
+
+The flow snapshots the container image, packages named volume data, sends package over UDP with ACK+retry and SHA-256 verification, then recreates container on target.
+
+## Notes
+
+- Runtime target for v1 is Docker.
+- Migration is offline-safe: stop impacted containers, copy data, relink volume path, restart.
+- Use dry-run by default; use `--apply --yes` to execute.
+- `volumes map` shows both Docker logical mountpoint and resolved data path.
+- Full-container UDP transfer supports named volumes; bind mounts are rejected because host paths are not portable.

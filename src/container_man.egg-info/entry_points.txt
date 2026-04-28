@@ -1,0 +1,2 @@
+[console_scripts]
+cm = container_man.cli.main:main
