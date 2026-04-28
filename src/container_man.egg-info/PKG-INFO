@@ -47,7 +47,7 @@ Receiver (verify + send confirmation back):
 
 Sender (wait confirmation, then remove source):
 
-`cm containers transfer send --container webapp --package /tmp/webapp.cm.tgz --host 192.168.1.11 --port 9000 --bind-host 192.168.10.122 --wait-confirm-port 9100 --move --yes`
+`cm containers transfer send --container webapp --package /tmp/webapp.cm.tgz --host 192.168.1.11 --port 9000 --bind-host 192.168.10.122 --wait-confirm-port 9100 --remove-after-verification --yes`
 
 ## Notes
 
@@ -56,4 +56,4 @@ Sender (wait confirmation, then remove source):
 - Use dry-run by default; use `--apply --yes` to execute.
 - `volumes map` shows both Docker logical mountpoint and resolved data path.
 - Full-container UDP transfer supports named volumes; bind mounts are rejected because host paths are not portable.
-- `--move` only removes source after receiver confirms container is running and healthy (or has no healthcheck).
+- `--remove-after-verification` removes source only after receiver confirms container is running and healthy (or has no healthcheck).

@@ -76,7 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
     containers_transfer_send.add_argument("--chunk-size", default=1200, type=int)
     containers_transfer_send.add_argument("--timeout", default=1.0, type=float)
     containers_transfer_send.add_argument("--retries", default=10, type=int)
-    containers_transfer_send.add_argument("--wait-confirm-port", type=int)
+    containers_transfer_send.add_argument("--confirm-port", default=9100, type=int)
     containers_transfer_send.add_argument("--confirm-timeout", default=120.0, type=float)
     containers_transfer_send.add_argument("--move", action="store_true")
     containers_transfer_send.add_argument("--remove-after-verification", action="store_true")
@@ -89,8 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
     containers_transfer_receive.add_argument("--overwrite-package", action="store_true")
     containers_transfer_receive.add_argument("--timeout", type=float)
     containers_transfer_receive.add_argument("--name")
-    containers_transfer_receive.add_argument("--confirm-host")
-    containers_transfer_receive.add_argument("--confirm-port", type=int)
+    containers_transfer_receive.add_argument("--confirm-port", default=9100, type=int)
 
     return parser
 
@@ -324,11 +323,8 @@ def cmd_containers_transfer_send(runtime: DockerCliRuntime, args: argparse.Names
                 file=sys.stderr,
             )
             return 2
-        if not args.wait_confirm_port:
-            print(
-                "error: --remove-after-verification requires --wait-confirm-port",
-                file=sys.stderr,
-            )
+        if args.confirm_port <= 0:
+            print("error: --confirm-port must be positive", file=sys.stderr)
             return 2
     result = service.send_container(
         container=args.container,
@@ -353,10 +349,10 @@ def cmd_containers_transfer_send(runtime: DockerCliRuntime, args: argparse.Names
         {"metric": "chunks", "value": str(payload["transfer"]["chunks"])},
         {"metric": "sha256", "value": payload["transfer"]["sha256"]},
     ]
-    if args.wait_confirm_port:
+    if should_remove_after_verification:
         verification = service.wait_for_move_confirmation(
-            bind_host=args.bind_host,
-            bind_port=args.wait_confirm_port,
+            bind_host="0.0.0.0",
+            bind_port=args.confirm_port,
             timeout_seconds=args.confirm_timeout,
         )
         if not verification.ok:
@@ -394,15 +390,14 @@ def cmd_containers_transfer_receive(runtime: DockerCliRuntime, args: argparse.Na
     )
     payload = _render_container_transfer_payload(result)
     verification = service.verify_container_running(result.container_id)
-    if args.confirm_host and args.confirm_port:
-        service.send_move_confirmation(
-            sender_host=args.confirm_host,
-            sender_port=args.confirm_port,
-            container_name=result.container_name,
-            verification=verification,
-        )
-    elif args.confirm_host or args.confirm_port:
-        raise ContainerTransferError("Both --confirm-host and --confirm-port are required together.")
+    source = str(payload["transfer"]["source"])
+    sender_host = source.rsplit(":", maxsplit=1)[0]
+    service.send_move_confirmation(
+        sender_host=sender_host,
+        sender_port=args.confirm_port,
+        container_name=result.container_name,
+        verification=verification,
+    )
     if args.as_json:
         payload["verification"] = _render_verification_payload(verification)
         print(json.dumps(payload, indent=2))

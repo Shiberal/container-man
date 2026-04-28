@@ -33,13 +33,13 @@ The flow snapshots the container image, packages named volume data, sends packag
 
 ### Move semantics (verify then delete source)
 
-Receiver (verify + send confirmation back):
+Receiver (simple, confirmation is automatic):
 
-`cm containers transfer receive --package /srv/inbox/webapp.cm.tgz --bind-host 192.168.1.11 --port 9000 --confirm-host 192.168.10.122 --confirm-port 9100`
+`cm containers transfer receive`
 
 Sender (wait confirmation, then remove source):
 
-`cm containers transfer send --container webapp --package /tmp/webapp.cm.tgz --host 192.168.1.11 --port 9000 --bind-host 192.168.10.122 --wait-confirm-port 9100 --remove-after-verification --yes`
+`cm containers transfer send --container webapp --host 192.168.1.11 --remove-after-verification --yes`
 
 ## Notes
 
@@ -49,3 +49,4 @@ Sender (wait confirmation, then remove source):
 - `volumes map` shows both Docker logical mountpoint and resolved data path.
 - Full-container UDP transfer supports named volumes; bind mounts are rejected because host paths are not portable.
 - `--remove-after-verification` removes source only after receiver confirms container is running and healthy (or has no healthcheck).
+- Automatic confirmation uses UDP port `9100` by default on sender (override with `--confirm-port` if needed).
