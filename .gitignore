@@ -2,3 +2,16 @@
 /.shallremember
 /.venv
 /AGENT.md
+src/container_man/__pycache__/__init__.cpython-313.pyc
+src/container_man/__pycache__/models.cpython-313.pyc
+src/container_man/cli/__pycache__/__init__.cpython-313.pyc
+src/container_man/cli/__pycache__/main.cpython-313.pyc
+src/container_man/services/__pycache__/__init__.cpython-313.pyc
+src/container_man/services/__pycache__/container_transfer.cpython-313.pyc
+src/container_man/services/__pycache__/filesystem.cpython-313.pyc
+src/container_man/services/__pycache__/migration.cpython-313.pyc
+src/container_man/services/__pycache__/topology.cpython-313.pyc
+src/container_man/services/__pycache__/udp_transfer.cpython-313.pyc
+cm_test.tgz
+src/container_man/runtime/__pycache__/__init__.cpython-313.pyc
+src/container_man/runtime/__pycache__/docker_cli.cpython-313.pyc

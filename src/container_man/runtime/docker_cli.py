@@ -167,3 +167,6 @@ class DockerCliRuntime:
 
     def create_container(self, args: list[str]) -> str:
         return self._run_docker("create", *args).strip()
+
+    def run(self, *args: str) -> str:
+        return self._run_docker(*args)

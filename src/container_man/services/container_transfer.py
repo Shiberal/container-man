@@ -12,6 +12,7 @@ from container_man.services.udp_transfer import TransferResult, UdpTransferServi
 
 IMAGE_ARCHIVE_NAME = "image.tar"
 METADATA_NAME = "metadata.json"
+HELPER_IMAGE = "alpine:3.20"
 
 
 class ContainerTransferError(RuntimeError):
@@ -108,7 +109,7 @@ class ContainerTransferService:
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
         image_ref = f"cm-transfer/{container_name}:{timestamp}"
 
-        with tempfile.TemporaryDirectory(prefix="cm-transfer-export-") as tmp:
+        with self._temporary_workspace("cm-transfer-export-") as tmp:
             tmp_dir = Path(tmp)
             image_tar = tmp_dir / IMAGE_ARCHIVE_NAME
             volumes_dir = tmp_dir / "volumes"
@@ -128,14 +129,9 @@ class ContainerTransferService:
                 name = mount.get("Name")
                 if not name:
                     continue
-                inspect_volume = self.runtime.inspect_volume(name)
-                mountpoint = inspect_volume.get("Mountpoint")
-                if not mountpoint:
-                    raise ContainerTransferError(f"Volume '{name}' has no mountpoint.")
-                src = Path(mountpoint).expanduser().resolve()
                 archive_rel = f"volumes/{name}.tar"
                 archive_file = tmp_dir / archive_rel
-                self._archive_directory(src, archive_file)
+                self._archive_volume(name, archive_file)
                 volume_entries.append(
                     {
                         "name": name,
@@ -173,7 +169,7 @@ class ContainerTransferService:
         if not package.exists():
             raise ContainerTransferError(f"Package '{package}' not found.")
 
-        with tempfile.TemporaryDirectory(prefix="cm-transfer-import-") as tmp:
+        with self._temporary_workspace("cm-transfer-import-") as tmp:
             tmp_dir = Path(tmp)
             with tarfile.open(package, mode="r:gz") as archive:
                 archive.extractall(path=tmp_dir)
@@ -189,10 +185,7 @@ class ContainerTransferService:
             for volume in volumes:
                 name = str(volume["name"])
                 self.runtime.create_volume(name)
-                mountpoint = self.runtime.inspect_volume(name).get("Mountpoint")
-                if not mountpoint:
-                    raise ContainerTransferError(f"Volume '{name}' has no mountpoint on target.")
-                self._extract_archive(tmp_dir / str(volume["archive"]), Path(mountpoint))
+                self._extract_archive_to_volume(tmp_dir / str(volume["archive"]), name)
 
             target_name = container_name or str(metadata.get("container_name", "cm-imported"))
             run_args = self._build_container_create_args(
@@ -211,15 +204,44 @@ class ContainerTransferService:
                 "image_ref": image_ref,
             }
 
-    def _archive_directory(self, source: Path, target_archive: Path) -> None:
+    def _archive_volume(self, volume_name: str, target_archive: Path) -> None:
         target_archive.parent.mkdir(parents=True, exist_ok=True)
-        with tarfile.open(target_archive, mode="w") as tar:
-            tar.add(source, arcname=".")
+        host_dir = str(target_archive.parent.resolve())
+        archive_name = target_archive.name
+        self.runtime.run(
+            "run",
+            "--rm",
+            "-v",
+            f"{volume_name}:/volume:ro",
+            "-v",
+            f"{host_dir}:/backup",
+            HELPER_IMAGE,
+            "sh",
+            "-c",
+            f"tar -cf /backup/{archive_name} -C /volume .",
+        )
 
-    def _extract_archive(self, archive_path: Path, destination: Path) -> None:
-        destination.mkdir(parents=True, exist_ok=True)
-        with tarfile.open(archive_path, mode="r") as tar:
-            tar.extractall(path=destination)
+    def _extract_archive_to_volume(self, archive_path: Path, volume_name: str) -> None:
+        archive = archive_path.resolve()
+        if not archive.exists():
+            raise ContainerTransferError(f"Archive '{archive}' not found for volume '{volume_name}'.")
+        host_dir = str(archive.parent)
+        archive_name = archive.name
+        self.runtime.run(
+            "run",
+            "--rm",
+            "-v",
+            f"{volume_name}:/volume",
+            "-v",
+            f"{host_dir}:/backup:ro",
+            HELPER_IMAGE,
+            "sh",
+            "-c",
+            f"tar -xf /backup/{archive_name} -C /volume",
+        )
+
+    def _temporary_workspace(self, prefix: str) -> tempfile.TemporaryDirectory[str]:
+        return tempfile.TemporaryDirectory(prefix=prefix, dir=str(Path.home()))
 
     def _build_runtime_config(self, inspect: dict) -> dict:
         config = inspect.get("Config", {})
