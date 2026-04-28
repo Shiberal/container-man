@@ -170,3 +170,17 @@ class DockerCliRuntime:
 
     def run(self, *args: str) -> str:
         return self._run_docker(*args)
+
+    def remove_container(self, container_ref: str, *, force: bool = False) -> None:
+        args = ["rm"]
+        if force:
+            args.append("--force")
+        args.append(container_ref)
+        self._run_docker(*args)
+
+    def remove_volume(self, volume_name: str, *, force: bool = False) -> None:
+        args = ["volume", "rm"]
+        if force:
+            args.append("--force")
+        args.append(volume_name)
+        self._run_docker(*args)

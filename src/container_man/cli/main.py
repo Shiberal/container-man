@@ -4,10 +4,12 @@ import argparse
 import json
 import sys
 from dataclasses import asdict
+from pathlib import Path
 
 from container_man.runtime.docker_cli import DockerCliRuntime, DockerCommandError
 from container_man.services.container_transfer import (
     ContainerReceiveResult,
+    ReceiveVerification,
     ContainerSendResult,
     ContainerTransferError,
     ContainerTransferService,
@@ -67,21 +69,27 @@ def build_parser() -> argparse.ArgumentParser:
     containers_transfer_send = containers_transfer_sub.add_parser("send")
     containers_transfer_send.add_argument("--container", required=True)
     containers_transfer_send.add_argument("--host", required=True)
-    containers_transfer_send.add_argument("--port", required=True, type=int)
-    containers_transfer_send.add_argument("--package", required=True)
+    containers_transfer_send.add_argument("--port", default=9000, type=int)
+    containers_transfer_send.add_argument("--package")
     containers_transfer_send.add_argument("--bind-host", default="0.0.0.0")
     containers_transfer_send.add_argument("--bind-port", default=0, type=int)
     containers_transfer_send.add_argument("--chunk-size", default=1200, type=int)
     containers_transfer_send.add_argument("--timeout", default=1.0, type=float)
     containers_transfer_send.add_argument("--retries", default=10, type=int)
+    containers_transfer_send.add_argument("--wait-confirm-port", type=int)
+    containers_transfer_send.add_argument("--confirm-timeout", default=120.0, type=float)
+    containers_transfer_send.add_argument("--move", action="store_true")
+    containers_transfer_send.add_argument("--yes", action="store_true")
 
     containers_transfer_receive = containers_transfer_sub.add_parser("receive")
-    containers_transfer_receive.add_argument("--package", required=True)
-    containers_transfer_receive.add_argument("--port", required=True, type=int)
+    containers_transfer_receive.add_argument("--package")
+    containers_transfer_receive.add_argument("--port", default=9000, type=int)
     containers_transfer_receive.add_argument("--bind-host", default="0.0.0.0")
     containers_transfer_receive.add_argument("--overwrite-package", action="store_true")
     containers_transfer_receive.add_argument("--timeout", type=float)
     containers_transfer_receive.add_argument("--name")
+    containers_transfer_receive.add_argument("--confirm-host")
+    containers_transfer_receive.add_argument("--confirm-port", type=int)
 
     return parser
 
@@ -288,13 +296,37 @@ def _render_container_transfer_payload(result: ContainerSendResult | ContainerRe
     return payload
 
 
+def _render_verification_payload(verification: ReceiveVerification) -> dict[str, str]:
+    return {
+        "ok": str(verification.ok).lower(),
+        "running": str(verification.running).lower(),
+        "healthy": str(verification.healthy).lower(),
+        "details": verification.details,
+    }
+
+
+def _default_sender_package(container: str) -> str:
+    return str((Path("/tmp") / f"{container}.cm.tgz").resolve())
+
+
+def _default_receiver_package() -> str:
+    return str((Path("/tmp") / "cm-received-container.cm.tgz").resolve())
+
+
 def cmd_containers_transfer_send(runtime: DockerCliRuntime, args: argparse.Namespace) -> int:
     service = ContainerTransferService(runtime=runtime)
+    if args.move:
+        if not args.yes:
+            print("error: --move requires --yes confirmation", file=sys.stderr)
+            return 2
+        if not args.wait_confirm_port:
+            print("error: --move requires --wait-confirm-port", file=sys.stderr)
+            return 2
     result = service.send_container(
         container=args.container,
         destination_host=args.host,
         destination_port=args.port,
-        package_path=args.package,
+        package_path=args.package or _default_sender_package(args.container),
         bind_host=args.bind_host,
         bind_port=args.bind_port,
         timeout_seconds=args.timeout,
@@ -313,6 +345,31 @@ def cmd_containers_transfer_send(runtime: DockerCliRuntime, args: argparse.Names
         {"metric": "chunks", "value": str(payload["transfer"]["chunks"])},
         {"metric": "sha256", "value": payload["transfer"]["sha256"]},
     ]
+    if args.wait_confirm_port:
+        verification = service.wait_for_move_confirmation(
+            bind_host=args.bind_host,
+            bind_port=args.wait_confirm_port,
+            timeout_seconds=args.confirm_timeout,
+        )
+        if not verification.ok:
+            raise ContainerTransferError(
+                f"Receiver did not verify container as healthy: {verification.details}"
+            )
+        rows.extend(
+            [
+                {"metric": "receiver_verified", "value": "true"},
+                {"metric": "receiver_status", "value": verification.details},
+            ]
+        )
+        if args.move:
+            removed_volumes = service.remove_sender_container_after_move(args.container)
+            rows.append({"metric": "source_removed", "value": "true"})
+            rows.append(
+                {
+                    "metric": "source_volumes_removed",
+                    "value": ",".join(removed_volumes) if removed_volumes else "-",
+                }
+            )
     print_table(rows)
     return 0
 
@@ -320,7 +377,7 @@ def cmd_containers_transfer_send(runtime: DockerCliRuntime, args: argparse.Names
 def cmd_containers_transfer_receive(runtime: DockerCliRuntime, args: argparse.Namespace) -> int:
     service = ContainerTransferService(runtime=runtime)
     result = service.receive_container(
-        package_path=args.package,
+        package_path=args.package or _default_receiver_package(),
         bind_host=args.bind_host,
         bind_port=args.port,
         overwrite_package=args.overwrite_package,
@@ -328,7 +385,18 @@ def cmd_containers_transfer_receive(runtime: DockerCliRuntime, args: argparse.Na
         container_name=args.name,
     )
     payload = _render_container_transfer_payload(result)
+    verification = service.verify_container_running(result.container_id)
+    if args.confirm_host and args.confirm_port:
+        service.send_move_confirmation(
+            sender_host=args.confirm_host,
+            sender_port=args.confirm_port,
+            container_name=result.container_name,
+            verification=verification,
+        )
+    elif args.confirm_host or args.confirm_port:
+        raise ContainerTransferError("Both --confirm-host and --confirm-port are required together.")
     if args.as_json:
+        payload["verification"] = _render_verification_payload(verification)
         print(json.dumps(payload, indent=2))
         return 0
     rows = [
@@ -338,8 +406,13 @@ def cmd_containers_transfer_receive(runtime: DockerCliRuntime, args: argparse.Na
         {"metric": "image_ref", "value": payload["image_ref"]},
         {"metric": "source", "value": payload["transfer"]["source"]},
         {"metric": "bytes_transferred", "value": str(payload["transfer"]["bytes_transferred"])},
+        {"metric": "verified_running", "value": str(verification.running).lower()},
+        {"metric": "verified_healthy", "value": str(verification.healthy).lower()},
+        {"metric": "verification_details", "value": verification.details},
     ]
     print_table(rows)
+    if not verification.ok:
+        raise ContainerTransferError(verification.details)
     return 0
 
 

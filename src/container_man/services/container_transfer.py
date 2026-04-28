@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import tarfile
 import tempfile
 from dataclasses import dataclass
@@ -32,6 +33,14 @@ class ContainerReceiveResult:
     container_name: str
     image_ref: str
     transfer: TransferResult
+
+
+@dataclass(slots=True)
+class ReceiveVerification:
+    ok: bool
+    running: bool
+    healthy: bool
+    details: str
 
 
 class ContainerTransferService:
@@ -203,6 +212,79 @@ class ContainerTransferService:
                 "container_name": target_name,
                 "image_ref": image_ref,
             }
+
+    def verify_container_running(self, container_ref: str) -> ReceiveVerification:
+        inspect = self.runtime.inspect_container(container_ref)
+        state = inspect.get("State", {})
+        running = bool(state.get("Running", False))
+        health_raw = (state.get("Health") or {}).get("Status")
+        healthy = health_raw in (None, "", "healthy")
+        ok = running and healthy
+        if ok:
+            details = "Container is running and healthy."
+        elif not running:
+            details = "Container is not running."
+        else:
+            details = f"Container health check failed: {health_raw}"
+        return ReceiveVerification(ok=ok, running=running, healthy=healthy, details=details)
+
+    def send_move_confirmation(
+        self,
+        *,
+        sender_host: str,
+        sender_port: int,
+        container_name: str,
+        verification: ReceiveVerification,
+    ) -> None:
+        payload = {
+            "type": "move_confirmation",
+            "container_name": container_name,
+            "ok": verification.ok,
+            "running": verification.running,
+            "healthy": verification.healthy,
+            "details": verification.details,
+        }
+        encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.sendto(encoded, (sender_host, sender_port))
+
+    def wait_for_move_confirmation(
+        self,
+        *,
+        bind_host: str,
+        bind_port: int,
+        timeout_seconds: float,
+    ) -> ReceiveVerification:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.bind((bind_host, bind_port))
+            sock.settimeout(timeout_seconds)
+            data, _addr = sock.recvfrom(65535)
+        try:
+            payload = json.loads(data.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ContainerTransferError("Invalid move confirmation packet.") from exc
+        if not isinstance(payload, dict) or payload.get("type") != "move_confirmation":
+            raise ContainerTransferError("Malformed move confirmation packet.")
+        return ReceiveVerification(
+            ok=bool(payload.get("ok", False)),
+            running=bool(payload.get("running", False)),
+            healthy=bool(payload.get("healthy", False)),
+            details=str(payload.get("details", "No details provided.")),
+        )
+
+    def remove_sender_container_after_move(self, container_ref: str) -> list[str]:
+        volumes = self.runtime.container_named_volumes(container_ref)
+        usage: dict[str, list[str]] = {
+            volume: self.runtime.containers_using_volume(volume) for volume in volumes
+        }
+        self.runtime.remove_container(container_ref, force=True)
+        removed_volumes: list[str] = []
+        for volume in volumes:
+            users = usage.get(volume, [])
+            if len(users) == 1 and users[0] == container_ref:
+                self.runtime.remove_volume(volume, force=False)
+                removed_volumes.append(volume)
+        return removed_volumes
 
     def _archive_volume(self, volume_name: str, target_archive: Path) -> None:
         target_archive.parent.mkdir(parents=True, exist_ok=True)
