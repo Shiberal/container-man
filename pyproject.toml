@@ -9,13 +9,23 @@ description = "Docker-focused container and volume manager"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "container-man" }]
-dependencies = []
+dependencies = [
+  "fastapi",
+  "uvicorn",
+  "jinja2",
+  "requests",
+]
 
 [project.scripts]
 cm = "container_man.cli.main:main"
+cm-web = "container_man.web.app:run"
+cm-agent = "container_man.agent.app:run"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"container_man.web" = ["templates/*.html"]

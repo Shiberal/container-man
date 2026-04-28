@@ -1,0 +1,6 @@
+[
+  {
+    "name": "node-a",
+    "base_url": "http://container-man-agent:8081"
+  }
+]

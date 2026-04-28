@@ -1,0 +1,17 @@
+services:
+  container-man-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    container_name: container-man-agent
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+      - "9000:9000/udp"
+      - "9100:9100/udp"
+    environment:
+      - CM_AGENT_HOST=0.0.0.0
+      - CM_AGENT_PORT=8081
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/bin/docker:/usr/bin/docker:ro

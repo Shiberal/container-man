@@ -1,0 +1,15 @@
+services:
+  container-man-web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: container-man-web
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - CM_WEB_HOST=0.0.0.0
+      - CM_WEB_PORT=8080
+      - CM_CLUSTER_NODES_FILE=/app/config/cluster_nodes.json
+    volumes:
+      - ./config:/app/config

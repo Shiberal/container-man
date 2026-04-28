@@ -13,6 +13,55 @@ Python CLI to manage Docker containers and volumes, inspect where volumes live, 
 - `cm volumes migrate --volume <name> --target <path> [--apply --yes]`
 - `cm transfer receive --output <path> --port <udp-port> [--bind-host <ip> --overwrite --timeout <seconds>]`
 - `cm transfer send --source <path> --host <ip> --port <udp-port> [--bind-host <ip> --bind-port <port> --chunk-size <bytes> --timeout <seconds> --retries <n>]`
+- `cm-web` (Web UI/API server)
+- `cm-agent` (Node agent/API server)
+
+## Architecture
+
+- `cm-agent`: install on every cluster node, executes Docker operations locally.
+- `cm-web`: central UI/controller, no direct Docker access; talks to all agents via HTTP.
+
+## Install agent on every node
+
+Run in Docker (recommended on each node):
+
+- `docker compose -f docker-compose.agent.yml up -d --build`
+- Agent API exposed on `http://<node-ip>:8081`
+
+Or run directly:
+
+- `cm-agent`
+
+## Run central UI
+
+- `docker compose -f docker-compose.web.yml up -d --build`
+- Open `http://<host>:8080`
+
+Or run directly:
+
+- `cm-web`
+
+What it provides now:
+- cluster node federation with online/offline status and per-node overview
+- proxy to each node agent APIs for transfer/migration operations
+- cluster-wide status panel in UI
+
+Optional cluster config file:
+
+`~/.config/container-man/cluster_nodes.json`
+
+When using Docker Compose WebUI in this repo, cluster config is loaded from:
+
+`config/cluster_nodes.json`
+
+```json
+[
+  { "name": "node-a", "base_url": "http://192.168.10.122:8081" },
+  { "name": "node-b", "base_url": "http://192.168.10.119:8081" }
+]
+```
+
+After adding nodes, use the Web UI "Refresh cluster" button to see all computers status.
 
 ## Host-to-host full container transfer example
 
