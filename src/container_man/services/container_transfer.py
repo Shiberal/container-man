@@ -204,8 +204,7 @@ class ContainerTransferService:
                 volumes=volumes,
             )
             container_id = self.runtime.create_container(run_args)
-            if bool(metadata.get("was_running", False)):
-                self.runtime.start_container(container_id)
+            self.runtime.start_container(container_id)
 
             return {
                 "container_id": container_id,
